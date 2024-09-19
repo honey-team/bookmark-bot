@@ -33,7 +33,7 @@ def handle_arg(arg: str, value: str, messages:"List[Message]", case:bool) -> Lis
         else:
             prev = None
 
-        if i == '\\' and next == '_':
+        if i == '\\' and next in ['_']:
             continue
         elif i == '_' and prev != '\\':
             out += ' '
@@ -119,6 +119,32 @@ def handle_arg(arg: str, value: str, messages:"List[Message]", case:bool) -> Lis
             or type == '<=' and len(i.attachments) <= value\
             or type == '>=' and len(i.attachments) >= value:
                 out.append(i.id)
+
+        return out
+    
+    # attachments have type
+    if arg == 'type':
+        value = value.lower().split(' ')
+
+        out = []
+
+        for i in messages:
+            for at in i.attachments:
+                if at.type.lower() in value:
+                    out.append(i.id)
+
+        return out
+    
+    # attachments have extension
+    if arg == 'extension':
+        value = value.lower().split(' ')
+
+        out = []
+
+        for i in messages:
+            for at in i.attachments:
+                if at.extension.lower() in value:
+                    out.append(i.id)
 
         return out
     
@@ -261,6 +287,7 @@ class Message:
         self.attachments: List[Attachment] = [
             Attachment(self.id, i) for i in data.get('attachments', [])
         ]
+        self.sent_at: float = data['sent_at']
 
     
     def to_dict(self) -> dict:
@@ -272,10 +299,11 @@ class Message:
             "text": self.text,
             "note": self.note,
             "saved_at": self.saved_at,
+            "sent_at": self.sent_at,
             "tags": self.tags,
             "guild_id": self.guild_id,
             "channel_id": self.channel_id,
-            "attachments": [i.to_dict() for i in self.attachments]
+            "attachments": [i.to_dict() for i in self.attachments],
         }
 
 
@@ -397,7 +425,8 @@ class Manager:
             "link": message.jump_url,
             "text": message.content,
             "guild_id": message.guild.id if message.guild else None,
-            "channel_id": message.channel.id
+            "channel_id": message.channel.id,
+            "sent_at": message.created_at.timestamp()
         })
         self.commit()
         return True
