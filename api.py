@@ -68,6 +68,60 @@ def handle_arg(arg: str, value: str, messages:"List[Message]", case:bool) -> Lis
             )
         ]
     
+    # guild id
+    if arg in ['server','guild']:
+        ids = value.lower().split(' ')
+
+        return [
+            m.id for m in messages if str(m.guild_id).lower() in ids
+        ]
+    
+    # channel id
+    if arg in ['channel']:
+        ids = value.split(' ')
+
+        return [
+            m.id for m in messages if str(m.channel_id) in ids
+        ]
+    
+    # attachment amount
+    if arg == 'attachments':
+        type = '='
+
+        if value.startswith('>='):
+            value = value[2:]
+            type = '>='
+        elif value.startswith('<='):
+            value = value[2:]
+            type = '<='
+
+        elif value.startswith('>'):
+            value = value[1:]
+            type = '>'
+        elif value.startswith('<'):
+            value = value[1:]
+            type = '<'
+        
+        if not value.isnumeric():
+            return []
+        
+        value = int(value)
+        if value < 0:
+            return []
+
+        out = []
+
+        # im sorry
+        for i in messages:
+            if type == '=' and len(i.attachments) == value\
+            or type == '<' and len(i.attachments) < value\
+            or type == '>' and len(i.attachments) > value\
+            or type == '<=' and len(i.attachments) <= value\
+            or type == '>=' and len(i.attachments) >= value:
+                out.append(i.id)
+
+        return out
+    
     # nope
     return []
 
@@ -159,6 +213,34 @@ class User:
         return out
 
 
+# message and message-related classes
+
+class Attachment:
+    def __init__(self, id:int, data:dict):
+        '''
+        Represents a message attachment.
+        '''
+        self.parent: int = id
+        self.id: int = data['id']
+        self.type: str = data.get('type', 'none')
+        self.extension: str = data.get('extension', 'none')
+        self.filename: str = data['filename']
+        self.url: str = data['url']
+
+    
+    def to_dict(self) -> dict:
+        '''
+        Converts the class to a dictionary to store in the file.
+        '''
+        return {
+            "id": self.id,
+            "type": self.type,
+            "extension": self.extension,
+            "filename": self.filename,
+            "url": self.url
+        }
+    
+
 class Message:
     def __init__(self, id:int, data:dict):
         '''
@@ -166,14 +248,19 @@ class Message:
         '''
         self.id: int = id
         self.link: str = data['link']
+        self.guild_id: "int | None" = data.get('guild_id', None)
+        self.channel_id: int = data['channel_id']
         self.text: str = data.get('text', '')
         self.note: str = data.get(
-            'note', utils.shorten_string(self.text)
+            'note', utils.remove_md(utils.shorten_string(self.text), True)
         )
         if len(self.note) == 0:
             self.note = '...'
         self.saved_at: float = data.get('saved_at', time.time())
         self.tags: List[str] = data.get('tags', [])
+        self.attachments: List[Attachment] = [
+            Attachment(self.id, i) for i in data.get('attachments', [])
+        ]
 
     
     def to_dict(self) -> dict:
@@ -185,7 +272,10 @@ class Message:
             "text": self.text,
             "note": self.note,
             "saved_at": self.saved_at,
-            "tags": self.tags
+            "tags": self.tags,
+            "guild_id": self.guild_id,
+            "channel_id": self.channel_id,
+            "attachments": [i.to_dict() for i in self.attachments]
         }
 
 
@@ -306,6 +396,8 @@ class Manager:
         guser.saved[message.id] = Message(message.id, {
             "link": message.jump_url,
             "text": message.content,
+            "guild_id": message.guild.id if message.guild else None,
+            "channel_id": message.channel.id
         })
         self.commit()
         return True
@@ -322,7 +414,7 @@ class Manager:
         if message not in guser.saved:
             return False
 
-        guser.saved[message].note = note
+        guser.saved[message].note = utils.remove_md(note, True)
         self.commit()
         return True
 

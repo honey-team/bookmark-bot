@@ -18,6 +18,20 @@ def str_to_superscript(string:str) -> str:
         string = string.replace(a,b)
         
     return string
+    
+
+def remove_md(string:str, escape_spoilers:bool=False) -> str:
+    '''
+    Escapes any markdown symbols.
+    '''
+    string = string.replace('\\', '\\\\') # confusing af 
+    string = string.replace('*', '\\*')
+    string = string.replace('_', '\\_')
+    string = string.replace('~', '\\~')
+    if escape_spoilers:
+        string = string.replace('|', '\\|')
+
+    return string
 
     
 def shorten_string(string:str, max_chars:int=50, remove_newlines:bool=True) -> str:

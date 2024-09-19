@@ -17,6 +17,61 @@ TOKEN = os.getenv('BOT_TOKEN')
 bot = commands.Bot(command_prefix=PREFIX, intents=discord.Intents.default(), help_command=None)
 mg = api.Manager(USERS_FILE)
 
+# functions
+
+def get_manage_view(
+    bm:api.Message,
+    jump:bool=True,
+    note:bool=True,
+    remove:bool=True
+):
+    view = discord.ui.View()
+    
+    if jump:
+        button = discord.ui.Button(
+            style=discord.ButtonStyle.gray,
+            label='Go to message', url=bm.link
+        )
+        view.add_item(button)
+
+    if note:
+        n_button = discord.ui.Button(
+            style=discord.ButtonStyle.blurple,
+            label='Set note',
+            custom_id=f'n{bm.id}'
+        )
+        view.add_item(n_button)
+    
+    if remove:
+        r_button = discord.ui.Button(
+            style=discord.ButtonStyle.red,
+            label='Remove',
+            custom_id=f'r{bm.id}'
+        )
+        view.add_item(r_button)
+
+    return view
+
+
+def get_bm_embed(bm:api.Message):
+    stats = f'Channel: `{bm.channel_id}`'
+    if bm.guild_id:
+        stats += f' ・ Guild: `{bm.guild_id}`'
+
+    lenat = len(bm.attachments)
+    if lenat != 0:
+        stats += f'\n-# {lenat} attachment{"s" if lenat > 1 else ""}'
+
+    embed = discord.Embed(
+        color=discord.Color.green(),
+        description=f"**Bookmark `{bm.id}`**\n-# {stats}"
+    )
+    embed.add_field(
+        name=bm.note,
+        value=utils.shorten_string(bm.text, 1024, False)
+    )
+    return embed
+
 # connection events
 
 @bot.event
@@ -78,6 +133,26 @@ async def on_interaction(inter:discord.Interaction):
 
     action = inter.data['custom_id'][0]
     id = int(inter.data['custom_id'][1:])
+
+    # viewing
+    if action == 'b':
+        out = mg.get_bookmark(inter.user.id, id)
+
+        if not out:
+            embed = discord.Embed(
+                color=discord.Color.red(),
+                description='**Not bookmarked!**'
+            )
+
+        else:
+            view = get_manage_view(out)
+            embed = get_bm_embed(out)
+
+            await inter.response.send_message(
+                embed=embed, view=view, ephemeral=True
+            )
+            return
+
 
     # removing bookmark
     if action == 'r':
@@ -185,18 +260,14 @@ async def bookmark(
     out = mg.bookmark(inter.user.id, message)
 
     if not out:
+        bm = mg.get_bookmark(inter.user.id, message.id)
+
         embed = discord.Embed(
             color=discord.Color.red(),
             description='**Already bookmarked!**'
         )
 
-        view = discord.ui.View()
-        button = discord.ui.Button(
-            style=discord.ButtonStyle.red,
-            label='Remove bookmark',
-            custom_id=f'r{message.id}'
-        )
-        view.add_item(button)
+        view = get_manage_view(bm, jump=False)
 
     else:
         embed = discord.Embed(
@@ -207,8 +278,8 @@ async def bookmark(
         view = discord.ui.View()
         button = discord.ui.Button(
             style=discord.ButtonStyle.blurple,
-            label='Add note',
-            custom_id=f'n{message.id}'
+            label='Manage',
+            custom_id=f'b{message.id}'
         )
         view.add_item(button)
         
@@ -230,7 +301,8 @@ async def bookmark(
 async def view_text(
     inter:discord.Interaction,
     prompt:str='',
-    case:Literal['Case sensitive','Case insensitive']='Case sensitive'
+    case:Literal['Case sensitive','Case insensitive']='Case sensitive',
+    page:int=1
 ):
     '''
     Searches for bookmarked messages.
@@ -292,37 +364,8 @@ async def view_text(
         await inter.response.send_message(embed=embed,ephemeral=True)
         return
     
-    view = discord.ui.View()
-    
-    button = discord.ui.Button(
-        style=discord.ButtonStyle.gray,
-        label='Go to message', url=bm.link
-    )
-    view.add_item(button)
-
-    n_button = discord.ui.Button(
-        style=discord.ButtonStyle.blurple,
-        label='Set note',
-        custom_id=f'n{id}'
-    )
-    view.add_item(n_button)
-    
-    r_button = discord.ui.Button(
-        style=discord.ButtonStyle.red,
-        label='Remove',
-        custom_id=f'r{id}'
-    )
-    view.add_item(r_button)
-
-
-    embed = discord.Embed(
-        color=discord.Color.green(),
-        description=f"**Bookmark {id}**"
-    )
-    embed.add_field(
-        name=bm.note,
-        value=utils.shorten_string(bm.text, 1024)
-    )
+    view = get_manage_view(bm)
+    embed = get_bm_embed(bm)
 
     await inter.response.send_message(
         embed=embed, view=view, ephemeral=True
