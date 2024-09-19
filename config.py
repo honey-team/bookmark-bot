@@ -1,3 +1,6 @@
 PREFIX = '!'
 LOG_FILE = 'log.txt'
 USERS_FILE = 'users.json'
+PAGE_LEN = 10
+MAX_PROMPT_LEN = 256
+NOTE_LEN = 100

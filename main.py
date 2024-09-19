@@ -19,6 +19,37 @@ mg = api.Manager(USERS_FILE)
 
 # functions
 
+def get_paginated_embed(
+    page:int, results:List[api.Message]
+) -> Tuple[discord.Embed, List[api.Message], int]:
+    '''
+    Converts a list of search results to a paginated embed.
+    '''
+    max_page = int(len(results)/PAGE_LEN) + \
+        (1 if len(results)%PAGE_LEN != 0 else 0)
+    page = min(max(page, 1), max_page)
+    stripped: List[api.Message] = results[(page-1)*PAGE_LEN:page*PAGE_LEN]
+
+    embed = discord.Embed(
+        color=discord.Color.green(),
+        title=f"**Found {len(results)} bookmarks**"
+    )
+    
+    for i in stripped:
+        desc = f'-# [Jump]({i.link})'
+
+        if i.attachments:
+            lenat = len(i.attachments)
+            desc += f' ・ {lenat} attachment{"s" if lenat > 1 else ""}'
+
+        if i.tags:
+            desc += f'\nTags: `{"`, `".join(i.tags)}`'
+            
+        embed.add_field(name=i.note, value=desc, inline=False)
+    embed.set_footer(text=f'Showing page {page} of {max_page}')
+    return (embed, stripped, page)
+
+
 def get_manage_view(
     bm:api.Message,
     jump:bool=True,
@@ -60,15 +91,20 @@ def get_bm_embed(bm:api.Message):
 
     lenat = len(bm.attachments)
     if lenat != 0:
-        stats += f'\n-# {lenat} attachment{"s" if lenat > 1 else ""}'
+        stats += f'\n{lenat} attachment{"s" if lenat > 1 else ""}'
+
+        for i in bm.attachments:
+            stats += f'\n- [{i.filename}]({i.url}) ・ '\
+                f'{i.type.capitalize()}, .{i.extension}'
 
     embed = discord.Embed(
+        title=bm.note,
         color=discord.Color.green(),
-        description=f"**Bookmark `{bm.id}`**\n-# {stats}"
+        description=bm.text
     )
     embed.add_field(
-        name=bm.note,
-        value=utils.shorten_string(bm.text, 1024, False)
+        name=f'Bookmark `{bm.id}`',
+        value=stats
     )
     return embed
 
@@ -88,15 +124,12 @@ async def handle_modal(inter:discord.Interaction):
     '''
     Handles modal submitting.
     '''
-    log(f'{inter.user.id} submitted modal {inter.id}')
-
     action = inter.data['custom_id'][0]
     id = int(inter.data['custom_id'][1:])
 
     # note
     if action == 'n':
         note = inter.data['components'][0]['components'][0]['value']
-        log(f'{inter.user.id} updated note of {id} to {note}')
 
         mg.set_note(inter.user.id, id, note)
 
@@ -129,8 +162,6 @@ async def on_interaction(inter:discord.Interaction):
         return
     
     # answering
-    log(f'{inter.user.id} pressed on {inter.id}')
-
     action = inter.data['custom_id'][0]
     id = int(inter.data['custom_id'][1:])
 
@@ -183,7 +214,7 @@ async def on_interaction(inter:discord.Interaction):
                 label='Note',
                 custom_id='note',
                 placeholder=bm.note,
-                max_length=50,
+                max_length=NOTE_LEN,
                 min_length=1
             )
             modal.add_item(input)
@@ -234,7 +265,7 @@ async def note(
             label='Note',
             custom_id='note',
             placeholder=out.note,
-            max_length=50,
+            max_length=NOTE_LEN,
             min_length=1
         )
         modal.add_item(input)
@@ -260,14 +291,10 @@ async def bookmark(
     out = mg.bookmark(inter.user.id, message)
 
     if not out:
-        bm = mg.get_bookmark(inter.user.id, message.id)
-
         embed = discord.Embed(
             color=discord.Color.red(),
             description='**Already bookmarked!**'
         )
-
-        view = get_manage_view(bm, jump=False)
 
     else:
         embed = discord.Embed(
@@ -275,13 +302,13 @@ async def bookmark(
             description='**Bookmarked!**'
         )
 
-        view = discord.ui.View()
-        button = discord.ui.Button(
-            style=discord.ButtonStyle.blurple,
-            label='Manage',
-            custom_id=f'b{message.id}'
-        )
-        view.add_item(button)
+    view = discord.ui.View()
+    button = discord.ui.Button(
+        style=discord.ButtonStyle.blurple,
+        label='Manage',
+        custom_id=f'b{message.id}'
+    )
+    view.add_item(button)
         
     await inter.response.send_message(
         embed=embed, view=view, ephemeral=True
@@ -296,7 +323,9 @@ async def bookmark(
 )
 @discord.app_commands.user_install()
 @discord.app_commands.describe(
-    prompt='Search prompt. Leave blank to show all.'
+    prompt='Search prompt. Leave blank to show all.',
+    case='Whether the search query is case-sensitive or not.',
+    page='Page to skip to.'
 )
 async def view_text(
     inter:discord.Interaction,
@@ -307,6 +336,15 @@ async def view_text(
     '''
     Searches for bookmarked messages.
     '''
+    if len(prompt) > MAX_PROMPT_LEN:
+        embed = discord.Embed(
+            color=discord.Color.red(),
+            description=f'**Prompt too long!**\n\n'\
+                f'{MAX_PROMPT_LEN} characters max.'
+        )
+        await inter.response.send_message(embed=embed, ephemeral=True)
+        return
+    
     user = mg.get_user(inter.user.id)
     search: List[api.Message] = user.search(
         prompt, case == 'Case sensitive'
@@ -317,21 +355,15 @@ async def view_text(
             color=discord.Color.red(),
             description='**No bookmarks found!**'
         )
+
     else:
-        desc = ''
-        
-        for i in search:
-            desc += f'{i.note}\n'
-            desc += f'-# [Jump]({i.link}) ・ {i.id}'
-            if i.tags:
-                desc += f' ・ Tags: `{"`, `".join(i.tags)}`'
-
-            desc += '\n\n'
-
-        embed = discord.Embed(
-            color=discord.Color.green(),
-            description=f"**Found {len(search)} bookmarks**\n\n"+desc
+        embed, elements, page = get_paginated_embed(
+            page=page, results=search
         )
+        max_page = int(len(search)/PAGE_LEN) + \
+            (1 if len(search)%PAGE_LEN != 0 else 0)
+        
+        # view = get_paginated_view(page, max_page)
 
     await inter.response.send_message(embed=embed,ephemeral=True)
 
@@ -370,6 +402,25 @@ async def view_text(
     await inter.response.send_message(
         embed=embed, view=view, ephemeral=True
     )
+
+
+@view_text.autocomplete('id')
+async def manage_autocomplete(
+    inter:discord.Interaction,
+    current:str
+) -> List[discord.app_commands.Choice[str]]:
+    '''
+    Autocomplete for manage command.
+    '''
+    user = mg.get_user(inter.user.id)
+    
+    return [
+        discord.app_commands.Choice(
+            name=f'{i.note} ({i.id})', value=str(i.id)
+        ) for i in user.saved.values()\
+        if str(i.id).startswith(current) or current == ''
+    ][::-1][:25]
+
         
 
 
