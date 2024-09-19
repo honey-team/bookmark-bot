@@ -136,8 +136,9 @@ def handle_arg(arg: str, value: str, messages:"List[Message]", case:bool) -> Lis
         return out
     
     # attachments have extension
-    if arg == 'extension':
+    if arg in ['extension','ext']:
         value = value.lower().split(' ')
+        value = [i.removeprefix('.') for i in value]
 
         out = []
 
@@ -179,7 +180,7 @@ class User:
         '''
         Searches the user's saved messages for the given prompt.
         '''
-        if prompt == '': return [i for i in self.saved.values()]
+        if prompt == '': return [i for i in self.saved.values()][::-1]
 
         codes = prompt.split(' ')
         results: List[List[int]] = []
@@ -234,7 +235,7 @@ class User:
                 out.append(i)
 
         # getting messages
-        out = [self.saved[i] for i in out]
+        out = [self.saved[i] for i in out][::-1]
 
         return out
 
@@ -266,6 +267,21 @@ class Attachment:
             "url": self.url
         }
     
+    
+    @staticmethod
+    def from_attachment(
+        attachment:discord.Attachment
+    ) -> dict:
+        '''
+        Converts a Discord attachment into a dict to pass in the Attachment object
+        '''
+        return {
+            "id": attachment.id,
+            "type": attachment.content_type.split('/')[0],
+            "extension": attachment.filename.split('.')[-1],
+            "filename": attachment.filename,
+            "url": attachment.url
+        }
 
 class Message:
     def __init__(self, id:int, data:dict):
@@ -278,7 +294,7 @@ class Message:
         self.channel_id: int = data['channel_id']
         self.text: str = data.get('text', '')
         self.note: str = data.get(
-            'note', utils.remove_md(utils.shorten_string(self.text), True)
+            'note', utils.remove_md(utils.shorten_string(self.text, NOTE_LEN), True)
         )
         if len(self.note) == 0:
             self.note = '...'
@@ -426,7 +442,11 @@ class Manager:
             "text": message.content,
             "guild_id": message.guild.id if message.guild else None,
             "channel_id": message.channel.id,
-            "sent_at": message.created_at.timestamp()
+            "sent_at": message.created_at.timestamp(),
+            "attachments": [
+                Attachment.from_attachment(i)\
+                    for i in message.attachments
+            ]
         })
         self.commit()
         return True
