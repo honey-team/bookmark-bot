@@ -304,6 +304,9 @@ class Message:
             Attachment(self.id, i) for i in data.get('attachments', [])
         ]
         self.sent_at: float = data['sent_at']
+        self.author_name: str = data['author']
+        self.author_id: int = data['author_id']
+        self.author_url: str = f'https://discord.com/users/{self.author_id}'
 
     
     def to_dict(self) -> dict:
@@ -320,6 +323,8 @@ class Message:
             "guild_id": self.guild_id,
             "channel_id": self.channel_id,
             "attachments": [i.to_dict() for i in self.attachments],
+            "author": self.author_name,
+            "author_id": self.author_id
         }
 
 
@@ -446,7 +451,9 @@ class Manager:
             "attachments": [
                 Attachment.from_attachment(i)\
                     for i in message.attachments
-            ]
+            ],
+            "author": message.author.display_name,
+            "author_id": message.author.id
         })
         self.commit()
         return True

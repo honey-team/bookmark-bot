@@ -1,3 +1,4 @@
+import time
 import api
 from config import *
 from log import *
@@ -40,12 +41,12 @@ def get_paginated_embed(
 
         if i.attachments:
             lenat = len(i.attachments)
-            desc += f' ・ {lenat} attachment{"s" if lenat > 1 else ""}'
+            desc += f' ・ {lenat} {ATT}'
 
         if i.tags:
             desc += f'\nTags: `{"`, `".join(i.tags)}`'
             
-        embed.add_field(name=i.note, value=desc, inline=False)
+        embed.add_field(name=utils.shorten_string(i.note, NOTE_LEN), value=desc, inline=False)
     embed.set_footer(text=f'Showing page {page} of {max_page}')
     return (embed, stripped, page)
 
@@ -85,16 +86,18 @@ def get_manage_view(
 
 
 def get_bm_embed(bm:api.Message):
-    stats = f'Channel: `{bm.channel_id}`'
-    if bm.guild_id:
-        stats += f' ・ Guild: `{bm.guild_id}`'
+    send_time = f'<t:{int(bm.sent_at)}:R>'
+    save_time = f'<t:{int(bm.saved_at)}:R>'
+
+    stats = f'-# [{bm.author_name}]'\
+        f'({bm.author_url}) ・ {SENT} {send_time} ・ {SAVE} {save_time}'
 
     lenat = len(bm.attachments)
     if lenat != 0:
-        stats += f'\n{lenat} attachment{"s" if lenat > 1 else ""}'
+        stats += f'\n\n-# {lenat} attachment{"s" if lenat != 1 else ""}'
 
         for i in bm.attachments:
-            stats += f'\n- [{i.filename}]({i.url}) ・ '\
+            stats += f'\n- -# [{i.filename.removesuffix("."+i.extension)}]({i.url}) ・ '\
                 f'{i.type.capitalize()}, .{i.extension}'
 
     embed = discord.Embed(
@@ -103,8 +106,12 @@ def get_bm_embed(bm:api.Message):
         description=bm.text
     )
     embed.add_field(
-        name=f'Bookmark `{bm.id}`',
+        name='',
         value=stats
+    )
+    embed.set_footer(
+        text=F'Channel: {bm.channel_id}'+
+            (f'\nGuild: {bm.guild_id}' if bm.guild_id else '')
     )
     return embed
 
@@ -162,8 +169,13 @@ async def on_interaction(inter:discord.Interaction):
         return
     
     # answering
-    action = inter.data['custom_id'][0]
-    id = int(inter.data['custom_id'][1:])
+    if inter.data['component_type'] == 3:
+        action = inter.data['custom_id']
+        id = int(inter.data['values'][0])
+    
+    else:
+        action = inter.data['custom_id'][0]
+        id = int(inter.data['custom_id'][1:])
 
     # viewing
     if action == 'b':
@@ -360,12 +372,33 @@ async def view_text(
         embed, elements, page = get_paginated_embed(
             page=page, results=search
         )
+        elements: List[api.Message]
         max_page = int(len(search)/PAGE_LEN) + \
             (1 if len(search)%PAGE_LEN != 0 else 0)
         
         # view = get_paginated_view(page, max_page)
+        view = discord.ui.View()
+        
+        dd = discord.ui.Select(
+            placeholder='Manage...',
+            min_values=1,
+            max_values=1,
+            custom_id='b',
+            options=[
+                discord.SelectOption(
+                    label=i.note,
+                    description=f'{i.author_name} - {i.id}',
+                    value=f'{i.id}',
+                ) for i in elements
+            ]
+        )
+        view.add_item(dd)
+        await inter.response.send_message(
+            embed=embed, view=view, ephemeral=True
+        )
+        return
 
-    await inter.response.send_message(embed=embed,ephemeral=True)
+    await inter.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(
@@ -416,7 +449,7 @@ async def manage_autocomplete(
     
     return [
         discord.app_commands.Choice(
-            name=f'{i.note} ({i.id})', value=str(i.id)
+            name=f'{utils.shorten_string(i.note,50)} ({i.id})', value=str(i.id)
         ) for i in user.saved.values()\
         if str(i.id).startswith(current) or current == ''
     ][::-1][:25]
