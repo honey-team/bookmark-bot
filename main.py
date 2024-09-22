@@ -37,7 +37,7 @@ def get_paginated_embed(
     )
     
     for i in stripped:
-        desc = f'-# [Jump]({i.link})'
+        desc = f'-# {utils.remove_md(i.author_name)} ・ [Jump]({i.link})'
 
         if i.attachments:
             lenat = len(i.attachments)
@@ -89,8 +89,8 @@ def get_bm_embed(bm:api.Message):
     send_time = f'<t:{int(bm.sent_at)}:R>'
     save_time = f'<t:{int(bm.saved_at)}:R>'
 
-    stats = f'-# [{bm.author_name}]'\
-        f'({bm.author_url}) ・ {SENT} {send_time} ・ {SAVE} {save_time}'
+    stats = f'-# {utils.remove_md(bm.author_name)}'\
+        f' ・ {SENT} {send_time} ・ {SAVE} {save_time}'
 
     lenat = len(bm.attachments)
     if lenat != 0:
