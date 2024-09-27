@@ -49,6 +49,8 @@ def handle_arg(arg: str, value: str, messages:"List[Message]", case:bool) -> Lis
                 m.text if case else m.text.lower()
             ) or value in (
                 m.note if case else m.note.lower()
+            ) or value.lower().replace(' ','_') in (
+                m.tags
             )
         ]
     
@@ -66,6 +68,13 @@ def handle_arg(arg: str, value: str, messages:"List[Message]", case:bool) -> Lis
             m.id for m in messages if value in (
                 m.note if case else m.note.lower()
             )
+        ]
+
+    # note
+    if arg == 'tag':
+        return [
+            m.id for m in messages if\
+                value.lower().replace(' ','_') in m.tags
         ]
     
     # guild id
@@ -146,6 +155,20 @@ def handle_arg(arg: str, value: str, messages:"List[Message]", case:bool) -> Lis
             for at in i.attachments:
                 if at.extension.lower() in value:
                     out.append(i.id)
+
+        return out
+    
+    # by user
+    if arg in ['by','from','author']:
+        value = value.lower().replace(' ','_')
+        value = value.removeprefix('<@').removesuffix('>')
+
+        out = []
+
+        for i in messages:
+            if i.author_name.lower() == value\
+            or str(i.author_id) == value:
+                out.append(i.id)
 
         return out
     
@@ -452,7 +475,7 @@ class Manager:
                 Attachment.from_attachment(i)\
                     for i in message.attachments
             ],
-            "author": message.author.display_name,
+            "author": message.author.name,
             "author_id": message.author.id
         })
         self.commit()
@@ -471,6 +494,52 @@ class Manager:
             return False
 
         guser.saved[message].note = utils.remove_md(note, True)
+        self.commit()
+        return True
+
+
+    def add_tag(self, user:int, message:int, tag:str) -> bool:
+        '''
+        Adds a tag to a bookmark.
+
+        Returns whether the tag was successfully added.
+        '''
+        guser = self.get_user(user)
+        
+        if message not in guser.saved:
+            return False
+        
+        tag = tag.lower().replace(' ','_')
+        message: Message = guser.saved[message]
+
+        if tag in message.tags:
+            return False
+        
+        message.tags.append(tag)
+
+        self.commit()
+        return True
+
+
+    def remove_tag(self, user:int, message:int, tag:str) -> bool:
+        '''
+        Removes a tag from a bookmark.
+
+        Returns whether the tag was successfully removed.
+        '''
+        guser = self.get_user(user)
+        
+        if message not in guser.saved:
+            return False
+        
+        tag = tag.lower().replace(' ','_')
+        message: Message = guser.saved[message]
+
+        if tag not in message.tags:
+            return False
+        
+        message.tags.remove(tag)
+
         self.commit()
         return True
 

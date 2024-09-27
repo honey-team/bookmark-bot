@@ -44,18 +44,20 @@ def get_paginated_embed(
             desc += f' ・ {lenat} {ATT}'
 
         if i.tags:
-            desc += f'\nTags: `{"`, `".join(i.tags)}`'
+            desc += f'\n-# Tags: `{"`, `".join(i.tags)}`'
             
         embed.add_field(name=utils.shorten_string(i.note, NOTE_LEN), value=desc, inline=False)
     embed.set_footer(text=f'Showing page {page} of {max_page}')
     return (embed, stripped, page)
 
 
+
 def get_manage_view(
     bm:api.Message,
     jump:bool=True,
     note:bool=True,
-    remove:bool=True
+    remove:bool=True,
+    tags:bool=True
 ):
     view = discord.ui.View()
     
@@ -70,7 +72,7 @@ def get_manage_view(
         n_button = discord.ui.Button(
             style=discord.ButtonStyle.blurple,
             label='Set note',
-            custom_id=f'n{bm.id}'
+            custom_id=f's{bm.id}'
         )
         view.add_item(n_button)
     
@@ -82,16 +84,47 @@ def get_manage_view(
         )
         view.add_item(r_button)
 
+    if tags:
+        t_button = discord.ui.Button(
+            style=discord.ButtonStyle.green,
+            label='Add tag',
+            custom_id=f't{bm.id}',
+            row=1,
+            disabled=len(bm.tags) >= MAX_TAGS
+        )
+        view.add_item(t_button)
+
+        if bm.tags != []:
+            t_dropdown = discord.ui.Select(
+                placeholder='Remove tags...',
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(label=i, value=i) for i in bm.tags
+                ],
+                custom_id=f'u{bm.id}'
+            )
+            view.add_item(t_dropdown)
+
     return view
 
 
 def get_bm_embed(bm:api.Message):
+    '''
+    Returns an embed to show when managing a bookmark.
+    '''
+    # author, send and save time
     send_time = f'<t:{int(bm.sent_at)}:R>'
     save_time = f'<t:{int(bm.saved_at)}:R>'
 
     stats = f'-# {utils.remove_md(bm.author_name)}'\
         f' ・ {SENT} {send_time} ・ {SAVE} {save_time}'
+    
+    # tags
+    if bm.tags != []:
+        stats += f'\n-# Tags: `{"`, `".join(bm.tags)}`'
 
+    # attachments
     lenat = len(bm.attachments)
     if lenat != 0:
         stats += f'\n\n-# {lenat} attachment{"s" if lenat != 1 else ""}'
@@ -100,6 +133,7 @@ def get_bm_embed(bm:api.Message):
             stats += f'\n- -# [{i.filename.removesuffix("."+i.extension)}]({i.url}) ・ '\
                 f'{i.type.capitalize()}, .{i.extension}'
 
+    # composing embed
     embed = discord.Embed(
         title=bm.note,
         color=discord.Color.green(),
@@ -109,8 +143,10 @@ def get_bm_embed(bm:api.Message):
         name='',
         value=stats
     )
+    # channel and guild id
     embed.set_footer(
-        text=F'Channel: {bm.channel_id}'+
+        text=f'Message: {bm.id}'+\
+            f'\nChannel: {bm.channel_id}'+\
             (f'\nGuild: {bm.guild_id}' if bm.guild_id else '')
     )
     return embed
@@ -145,6 +181,49 @@ async def handle_modal(inter:discord.Interaction):
             description=f'**Note updated!**\n\n{note}'
         )
 
+    # note but editing manage message
+    elif action == 's':
+        note = inter.data['components'][0]['components'][0]['value']
+
+        mg.set_note(inter.user.id, id, note)
+
+        bm = mg.get_bookmark(inter.user.id, id)
+        embed = get_bm_embed(bm)
+        view = get_manage_view(bm)
+
+        await inter.response.defer()
+        await inter.edit_original_response(
+            embed=embed, view=view
+        )
+        return
+
+    # tag
+    elif action == 't':
+        tag = inter.data['components'][0]['components'][0]['value']
+
+        out = mg.add_tag(inter.user.id, id, tag)
+        tag = tag.lower().replace(' ','_')
+
+        if not out:
+            embed = discord.Embed(
+                color=discord.Color.red(),
+                description=f'**Unable to add a tag!**\n\n'\
+                    '- This tag may already be on a message\n'\
+                    f'- The maximum number of tags has been reached ({MAX_TAGS})\n'\
+                    '- This message is not bookmarked'
+            )
+
+        else:
+            bm = mg.get_bookmark(inter.user.id, id)
+            view = get_manage_view(bm)
+            embed = get_bm_embed(bm)
+
+            await inter.response.defer()
+            await inter.edit_original_response(
+                embed=embed, view=view
+            )
+            return
+
     # unknown
     else:
         embed = discord.Embed(
@@ -154,6 +233,47 @@ async def handle_modal(inter:discord.Interaction):
 
     await inter.response.send_message(embed=embed, ephemeral=True)
 
+
+async def handle_dropdown(inter:discord.Interaction):
+    '''
+    Handles dropdown submitting.
+
+    Only handles dropdowns that do not have a single character in their custom id. 
+    '''
+    action = inter.data['custom_id'][0]
+    id = int(inter.data['custom_id'][1:])
+    value = inter.data['values'][0]
+
+    # removing tag
+    if action == 'u':
+        out = mg.remove_tag(inter.user.id, id, value)
+
+        if not out:
+            embed = discord.Embed(
+                color=discord.Color.red(),
+                description=f'**Tag `{value}` not found or message is not bookmarked!**'
+            )
+
+        else:
+            # changing message
+            bm = mg.get_bookmark(inter.user.id, id)
+            view = get_manage_view(bm)
+            embed = get_bm_embed(bm)
+
+            await inter.response.defer()
+            await inter.edit_original_response(
+                embed=embed, view=view
+            )
+            return
+
+    # unknown
+    else:
+        embed = discord.Embed(
+            color=discord.Color.red(),
+            description='**Unknown action!**'
+        )
+
+    await inter.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.event
@@ -170,9 +290,13 @@ async def on_interaction(inter:discord.Interaction):
     
     # answering
     if inter.data['component_type'] == 3:
-        action = inter.data['custom_id']
+        if len(inter.data['custom_id']) > 1:
+            await handle_dropdown(inter)
+            return
+        
+        action = inter.data['custom_id'][0]
         id = int(inter.data['values'][0])
-    
+        
     else:
         action = inter.data['custom_id'][0]
         id = int(inter.data['custom_id'][1:])
@@ -213,20 +337,57 @@ async def on_interaction(inter:discord.Interaction):
                 description='**Bookmark removed!**'
             )
 
+            await inter.response.defer()
+            await inter.edit_original_response(embed=embed, view=None)
+            return
+
     # setting note
-    elif action == 'n':
+    elif action == 'n' or action == 's':
         bm = mg.get_bookmark(inter.user.id, id)
 
         if bm != None:
             modal = discord.ui.Modal(
                 title='Set a note',
-                custom_id=f'n{id}'
+                custom_id=f'{action}{id}'
             )
             input = discord.ui.TextInput(
                 label='Note',
                 custom_id='note',
                 placeholder=bm.note,
                 max_length=NOTE_LEN,
+                min_length=1
+            )
+            modal.add_item(input)
+
+            await inter.response.send_modal(modal)
+            return
+        
+        embed = discord.Embed(
+            color=discord.Color.red(),
+            description='**Not bookmarked!**'
+        )
+
+    # adding tag
+    elif action == 't':
+        bm = mg.get_bookmark(inter.user.id, id)
+
+        if len(bm.tags) >= MAX_TAGS:
+            embed = discord.Embed(
+                color=discord.Color.red(),
+                description=f'**You can only have {len(bm.tags)} tags on a bookmark!**'
+            )
+            await inter.response.send_message(embed=embed, ephemeral=True)
+
+        if bm != None:
+            modal = discord.ui.Modal(
+                title='Add a tag',
+                custom_id=f't{id}'
+            )
+            input = discord.ui.TextInput(
+                label='Booru tag',
+                custom_id='tag',
+                placeholder=bm.note,
+                max_length=TAG_LEN,
                 min_length=1
             )
             modal.add_item(input)
@@ -342,7 +503,7 @@ async def bookmark(
 async def view_text(
     inter:discord.Interaction,
     prompt:str='',
-    case:Literal['Case sensitive','Case insensitive']='Case sensitive',
+    case:Literal['Case sensitive','Case insensitive']='Case insensitive',
     page:int=1
 ):
     '''
